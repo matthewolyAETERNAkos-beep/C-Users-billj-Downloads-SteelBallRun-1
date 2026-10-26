@@ -1,0 +1,68 @@
+name: Build STEEL BALL RUN APK
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Phone-friendly: if you only uploaded SteelBallRun.zip (not the unzipped files), unpack it here.
+      - name: Find the project
+        run: |
+          if [ -f settings.gradle ]; then
+            echo "PROJ=." >> "$GITHUB_ENV"
+          else
+            Z=$(ls ./*.zip | head -n 1)
+            mkdir -p _project
+            unzip -q -o "$Z" -d _project
+            if [ ! -f _project/settings.gradle ]; then
+              D=$(dirname "$(find _project -name settings.gradle | head -n 1)")
+              echo "PROJ=$D" >> "$GITHUB_ENV"
+            else
+              echo "PROJ=_project" >> "$GITHUB_ENV"
+            fi
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      # Reads song tags / embedded album art. If this step fails the app still works (it falls back to the web copy).
+      - name: Get tag-reader library
+        continue-on-error: true
+        working-directory: ${{ env.PROJ }}
+        run: |
+          npm pack jsmediatags@3.9.7
+          tar xzf jsmediatags-3.9.7.tgz package/dist/jsmediatags.min.js
+          cp package/dist/jsmediatags.min.js app/src/main/assets/jsmediatags.min.js
+          rm -rf package jsmediatags-3.9.7.tgz
+
+      - name: Build APK
+        working-directory: ${{ env.PROJ }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+          cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/STEEL-BALL-RUN.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: STEEL-BALL-RUN-apk
+          path: STEEL-BALL-RUN.apk
+
+      # Direct download link (Releases page) - easiest on a phone.
+      - name: Publish APK to Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ github.run_number }}
+          name: STEEL BALL RUN build ${{ github.run_number }}
+          files: STEEL-BALL-RUN.apk
